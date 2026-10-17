@@ -1,0 +1,9 @@
+# Netlify settings: publish the app folder as-is (no build step).
+[build]
+  publish = "app"
+  command = ""
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
