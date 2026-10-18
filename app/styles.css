@@ -402,3 +402,13 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .swatch svg { width: 18px; height: 18px; }
 .sched-head { flex-wrap: wrap; row-gap: 10px; }
 @media (max-width: 440px) { .sched-head h1 { width: 100%; } }
+
+/* ---------- job folders ---------- */
+.folders { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+.folder { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface); text-align: left; min-width: 0; }
+.folder strong { font-family: var(--font-head); font-weight: 800; font-size: 16px; }
+.folder-ic { color: var(--muted); margin-bottom: 4px; }
+.folder.on { border-color: var(--accent); background: var(--accent-soft); }
+.folder.on .folder-ic { color: var(--accent); }
+.uploadbar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.pdf-ic { width: 40px; height: 48px; flex: none; border-radius: 6px; background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); font-size: 11px; font-weight: 800; display: grid; place-items: center; letter-spacing: .04em; }

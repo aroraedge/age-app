@@ -8,7 +8,7 @@ import {
 } from "./lib.js";
 import { ComposeSheet } from "./screens.js";
 
-const TABS = [["timeline", "Timeline"], ["tasks", "Tasks"], ["location", "Location"], ["photos", "Photos"], ["crew", "Crew & Time"]];
+const TABS = [["timeline", "Timeline"], ["tasks", "Tasks"], ["location", "Location"], ["files", "Files"], ["crew", "Crew & Time"]];
 
 export function JobPage({ id, tab }) {
   const s = useStore();
@@ -67,7 +67,7 @@ export function JobPage({ id, tab }) {
       ${tab === "timeline" && html`<${TimelineTab} ...${ctx} />`}
       ${tab === "tasks" && html`<${TasksTab} ...${ctx} />`}
       ${tab === "location" && html`<${LocationTab} ...${ctx} />`}
-      ${tab === "photos" && html`<${PhotosTab} ...${ctx} />`}
+      ${(tab === "files" || tab === "photos") && html`<${FilesTab} ...${ctx} />`}
       ${tab === "crew" && html`<${CrewTab} ...${ctx} />`}
     </main>
 
@@ -128,7 +128,13 @@ function TimelineTab({ job, detail, urls, reloadDetail }) {
     if (job.start_date) ev.push({ ts: job.start_date + "T00:00:01", day: job.start_date, kind: "mile", text: job.start_date > t ? "Job is scheduled to start" : "Job started", icon: I.flag });
     if (job.end_date) ev.push({ ts: job.end_date + "T23:59:59", day: job.end_date, kind: "mile", text: job.status === "done" ? "Job finished" : job.end_date >= t ? "Scheduled to finish" : "Was due to finish", icon: I.flag });
     detail.notes.forEach((n) => ev.push({ ts: n.created_at, kind: "note", who: n.user_id, text: n.body, icon: I.note, note: n }));
-    detail.photos.forEach((p) => ev.push({ ts: p.created_at, kind: "photo", who: p.user_id, text: p.caption || "Added a photo", icon: I.camera, img: urls[p.path] }));
+    detail.photos.forEach((p) => {
+      const pdf = (p.mime || "").includes("pdf");
+      const where = FOLDERS[p.folder || "photos"]?.label || "Photos";
+      ev.push({ ts: p.created_at, kind: "photo", who: p.user_id, icon: pdf ? I.note : I.camera,
+        text: pdf ? `Added “${p.file_name || "document"}” to ${where}` : p.caption || (p.folder && p.folder !== "photos" ? `Added a photo to ${where}` : "Added a photo"),
+        img: pdf ? null : urls[p.path] });
+    });
     detail.logs.forEach((l) => {
       ev.push({ ts: l.arrived_at, kind: "in", who: l.user_id, text: "Arrived on site", icon: I.pin });
       if (l.departed_at) ev.push({ ts: l.departed_at, kind: "out", who: l.user_id, text: `Left site · ${hours(l.arrived_at, l.departed_at)} on the job`, icon: I.clock });
@@ -328,13 +334,37 @@ function LocationTab({ job, setSheet }) {
   </div>`;
 }
 
-// ------------------------------------------------------------ photos
-function PhotosTab({ job, detail, urls, reloadDetail }) {
+// ------------------------------------------------------------ files (ICR / Design / Photos)
+export const FOLDERS = {
+  icr: { label: "ICR", desc: "High-importance project documents", bossOnly: true },
+  design: { label: "Design", desc: "Plans, drawings and design documents", bossOnly: true },
+  photos: { label: "Photos", desc: "Photos from the job and specific tasks", bossOnly: false },
+};
+const fmtSize = (b) => (!b ? "" : b < 1024 * 1024 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
+const isPdfRow = (f) => (f.mime || "").includes("pdf");
+
+function FilesTab({ job, detail, urls, reloadDetail }) {
   const s = useStore();
+  const boss = isBoss();
   const input = useRef();
+  const [folder, setFolder] = useState(() => { try { return localStorage.getItem("jobFolder") || "photos"; } catch (_) { return "photos"; } });
+  const [taskFilter, setTaskFilter] = useState("");
+  const [uploadTask, setUploadTask] = useState("");
   const [busy, setBusy] = useState(0);
   const [view, setView] = useState(null);
-  const [confirmDel, setConfirmDel] = useState(false);
+  const [menu, setMenu] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  useEffect(() => { try { localStorage.setItem("jobFolder", folder); } catch (_) { /* ignore */ } }, [folder]);
+
+  const all = detail.photos.map((f) => ({ ...f, folder: f.folder || "photos" }));
+  const inFolder = all.filter((f) => f.folder === folder);
+  const shown = folder === "photos" && taskFilter ? inFolder.filter((f) => f.task_id === taskFilter) : inFolder;
+  const pdfs = shown.filter(isPdfRow);
+  const pics = shown.filter((f) => !isPdfRow(f));
+  const canUpload = boss || !FOLDERS[folder].bossOnly;
+  const jobTasks = tasksOf(job.id);
+  const taggedTasks = jobTasks.filter((t) => inFolder.some((f) => f.task_id === t.id));
+  const canChange = (f) => f.user_id === s.me.id || boss;
 
   async function upload(e) {
     const files = [...e.target.files];
@@ -343,30 +373,67 @@ function PhotosTab({ job, detail, urls, reloadDetail }) {
     setBusy(files.length);
     let ok = 0;
     for (const f of files) {
-      try { await api.uploadPhoto(job.id, s.me.id, f, ""); ok++; } catch (err) { toast(err.message || "Upload failed", "error"); }
+      try { await api.uploadFile(job.id, s.me.id, f, { folder, task_id: folder === "photos" ? uploadTask : null }); ok++; }
+      catch (err) { toast(friendlyErr(err), "error"); }
       setBusy((b) => b - 1);
     }
-    if (ok) toast(ok === 1 ? "Photo added" : `${ok} photos added`);
+    if (ok) toast(`${ok === 1 ? "1 file" : ok + " files"} added to ${FOLDERS[folder].label}`);
     reloadDetail();
   }
+  const friendlyErr = (err) => (/row-level security|permission/i.test(err?.message || "") ? "Only bosses can add files to this folder." : err?.message || "Upload failed");
+  const move = (f, to) => act(() => api.update("photos", { id: f.id }, { folder: to }), `Moved to ${FOLDERS[to].label}`).then(() => { setMenu(null); setView(null); reloadDetail(); });
 
   return html`<div>
-    <input ref=${input} type="file" accept="image/*" multiple class="hidden" onChange=${upload} />
-    <div class="photo-grid">
-      <button class="upload-tile" onClick=${() => input.current.click()} disabled=${busy > 0}>
-        <span style="text-align:center">${busy ? html`<div class="spinner" style="margin:auto"></div>` : html`${I.camera}<br />Add photo`}</span>
-      </button>
-      ${detail.photos.map((p) => html`<button key=${p.id} onClick=${() => setView(p)}><img src=${urls[p.path]} alt=${p.caption || "Job photo"} loading="lazy" /></button>`)}
-    </div>
-    ${!detail.photos.length && detail.loaded && html`<p class="muted small" style="margin-top:14px">Take progress photos so the office can see the work without driving out.</p>`}
+    <div class="folders">${Object.entries(FOLDERS).map(([k, v]) => html`<button key=${k} class="folder ${folder === k ? "on" : ""}" onClick=${() => { setFolder(k); setTaskFilter(""); }}>
+      <span class="folder-ic">${I.folder}</span><strong>${v.label}</strong><span class="small muted">${((n) => `${n} ${n === 1 ? "file" : "files"}`)(all.filter((f) => f.folder === k).length)}</span></button>`)}</div>
+
+    <div class="row spread" style="margin:4px 0 12px"><div class="grow"><h2>${FOLDERS[folder].label}</h2><div class="small muted">${FOLDERS[folder].desc}</div></div></div>
+
+    ${canUpload ? html`<div class="uploadbar">
+        ${folder === "photos" && jobTasks.length > 0 && html`<select value=${uploadTask} onChange=${(e) => setUploadTask(e.target.value)} aria-label="Tag photos with a task">
+          <option value="">No task (general job photo)</option>
+          ${jobTasks.map((t) => html`<option key=${t.id} value=${t.id}>Task: ${t.title}</option>`)}</select>`}
+        <button class="btn block" disabled=${busy > 0} onClick=${() => input.current.click()}>${busy ? `Uploading ${busy}…` : html`${I.plus} Add ${folder === "photos" ? "photos" : "PDFs or photos"}`}</button>
+        <input ref=${input} type="file" accept=${folder === "photos" ? "image/*,application/pdf" : "application/pdf,image/*"} multiple class="hidden" onChange=${upload} />
+      </div>`
+      : html`<p class="small muted" style="margin:0 0 12px">Only bosses can add files to ${FOLDERS[folder].label}. Everyone on the team can view them.</p>`}
+
+    ${folder === "photos" && taggedTasks.length > 0 && html`<div class="chips" style="margin-bottom:12px">
+      <button class="chip ${!taskFilter ? "on" : ""}" onClick=${() => setTaskFilter("")}>All photos</button>
+      ${taggedTasks.map((t) => html`<button key=${t.id} class="chip ${taskFilter === t.id ? "on" : ""}" onClick=${() => setTaskFilter(t.id)}>${t.title}</button>`)}</div>`}
+
+    ${pdfs.length > 0 && html`<div class="list" style="margin-bottom:14px">${pdfs.map((f) => html`<div class="li" key=${f.id}>
+      <span class="pdf-ic">PDF</span>
+      <a class="grow" href=${urls[f.path]} target="_blank" rel="noopener" style="color:inherit;text-decoration:none;min-width:0">
+        <strong style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.file_name || "Document.pdf"}</strong>
+        <span class="small">${firstName(person(f.user_id))} · ${fmtDate(f.created_at)}${f.size ? " · " + fmtSize(f.size) : ""}</span></a>
+      ${canChange(f) && html`<button class="icon-btn" aria-label="File options" onClick=${() => setMenu(f)}>${I.dots}</button>`}
+    </div>`)}</div>`}
+
+    ${pics.length > 0 && html`<div class="photo-grid">${pics.map((f) => html`<button key=${f.id} onClick=${() => setView(f)}><img src=${urls[f.path]} alt=${f.caption || "Job photo"} loading="lazy" /></button>`)}</div>`}
+
+    ${!shown.length && detail.loaded && html`<${Empty} icon=${I.folder} title=${`${FOLDERS[folder].label} is empty`}
+      text=${folder === "photos" ? "Take progress photos so the office can see the work without driving out." : canUpload ? "Add PDFs or photos with the button above." : "Nothing has been added yet."} />`}
+
     ${view && html`<div class="viewer" role="dialog" aria-label="Photo">
       <div class="bar"><button class="icon-btn" onClick=${() => setView(null)} aria-label="Close">${I.x}</button><span class="grow"></span>
-        ${(view.user_id === s.me.id || isBoss()) && html`<button class="icon-btn" onClick=${() => setConfirmDel(true)} aria-label="Delete photo">${I.trash}</button>`}</div>
+        ${canChange(view) && html`<button class="icon-btn" onClick=${() => setMenu(view)} aria-label="Photo options">${I.dots}</button>`}</div>
       <img src=${urls[view.path]} alt="" />
-      <div class="cap"><strong>${person(view.user_id)?.full_name || "Crew"}</strong> · ${fmtDate(view.created_at)} ${fmtTime(view.created_at)}${view.caption && html`<div>${view.caption}</div>`}</div>
+      <div class="cap"><strong>${person(view.user_id)?.full_name || "Crew"}</strong> · ${fmtDate(view.created_at)} ${fmtTime(view.created_at)}
+        ${view.task_id && jobTasks.find((t) => t.id === view.task_id) && html`<div>Task: ${jobTasks.find((t) => t.id === view.task_id).title}</div>`}
+        ${view.caption && html`<div>${view.caption}</div>`}</div>
     </div>`}
-    ${confirmDel && html`<${Confirm} title="Delete photo?" text="This removes it for everyone." onClose=${() => setConfirmDel(false)}
-      onOk=${async () => { if (await act(() => api.deletePhoto(view))) { setView(null); reloadDetail(); } }} />`}
+
+    ${menu && html`<${Sheet} title=${menu.file_name || "File"} onClose=${() => setMenu(null)}>
+      ${isPdfRow(menu) && html`<a class="btn block ghost" style="margin-bottom:10px" href=${urls[menu.path]} target="_blank" rel="noopener">Open</a>`}
+      ${boss && html`<${Field} label="Move to folder"><div class="seg">${Object.entries(FOLDERS).map(([k, v]) => html`<button type="button" key=${k} class=${menu.folder === k ? "on" : ""} onClick=${() => menu.folder !== k && move(menu, k)}>${v.label}</button>`)}</div></${Field}>`}
+      ${(menu.folder || "photos") === "photos" && jobTasks.length > 0 && html`<${Field} label="Task"><select value=${menu.task_id || ""} onChange=${(e) => act(() => api.update("photos", { id: menu.id }, { task_id: e.target.value || null }), "Saved").then(() => { setMenu(null); reloadDetail(); })}>
+        <option value="">No task</option>${jobTasks.map((t) => html`<option key=${t.id} value=${t.id}>${t.title}</option>`)}</select></${Field}>`}
+      <button class="btn block danger" onClick=${() => setConfirmDel(menu)}>${I.trash} Delete</button>
+    </${Sheet}>`}
+
+    ${confirmDel && html`<${Confirm} title="Delete this file?" text="This removes it for everyone." onClose=${() => setConfirmDel(null)}
+      onOk=${async () => { if (await act(() => api.deletePhoto(confirmDel), "Deleted")) { setMenu(null); setView(null); reloadDetail(); } }} />`}
   </div>`;
 }
 

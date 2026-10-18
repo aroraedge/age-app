@@ -241,6 +241,8 @@ const ICONS = {
   chevR: () => svg(p("M9 6l6 6-6 6")),
   share: () => svg(html`${p("M12 3v12M7 8l5-5 5 5")}${p("M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6")}`),
   copy: () => svg(html`<rect x="8" y="8" width="12" height="12" rx="2"/>${p("M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3")}`),
+  folder: () => svg(p("M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z")),
+  dots: () => svg(html`<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>`),
   hard: () => svg(html`${p("M3 18h18M5 18v-3a7 7 0 0 1 14 0v3")}${p("M10 8.5V6h4v2.5")}`),
 };
 // Fresh icon nodes every time (Preact must not reuse one node in two places).

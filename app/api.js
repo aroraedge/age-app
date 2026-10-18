@@ -120,17 +120,30 @@ async function shrinkImage(file, max = 1600, quality = 0.82) {
   return await new Promise((res) => c.toBlob((b) => res(b || file), "image/jpeg", quality));
 }
 
-export async function uploadPhoto(jobId, userId, file, caption) {
-  const blob = await shrinkImage(file, DEMO ? 900 : 1600, DEMO ? 0.7 : 0.82);
+// Uploads a photo or PDF into one of a job's folders (icr | design | photos).
+export const isPdf = (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name || "");
+export const isImage = (f) => (f.type || "").startsWith("image/") || /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name || "");
+const MAX_PDF_MB = 25;
+
+export async function uploadFile(jobId, userId, file, { folder = "photos", caption = "", task_id = null } = {}) {
+  const pdf = isPdf(file);
+  if (!pdf && !isImage(file)) throw new Error(`“${file.name}” isn't a photo or PDF.`);
+  if (pdf && file.size > MAX_PDF_MB * 1024 * 1024) throw new Error(`“${file.name}” is over ${MAX_PDF_MB} MB.`);
+  const blob = pdf ? file : await shrinkImage(file, DEMO ? 900 : 1600, DEMO ? 0.7 : 0.82);
+  const mime = pdf ? "application/pdf" : "image/jpeg";
+  const file_name = (file.name || (pdf ? "document.pdf" : "photo.jpg")).slice(0, 120);
+  const meta = { job_id: jobId, user_id: userId, caption, folder, file_name, mime, size: blob.size, task_id: task_id || null };
   if (DEMO) {
+    if (pdf && blob.size > 3 * 1024 * 1024) throw new Error("Demo mode only keeps PDFs under 3 MB.");
     const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
-    return demoInsert("photos", [{ job_id: jobId, user_id: userId, path: dataUrl, caption }]);
+    return demoInsert("photos", [{ ...meta, path: dataUrl }]);
   }
-  const path = `${userId}/${jobId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
-  const { error } = await sb.storage.from("job-photos").upload(path, blob, { contentType: "image/jpeg" });
+  const path = `${userId}/${jobId}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${pdf ? "pdf" : "jpg"}`;
+  const { error } = await sb.storage.from("job-photos").upload(path, blob, { contentType: mime });
   if (error) throw error;
-  return insert("photos", { job_id: jobId, user_id: userId, path, caption });
+  return insert("photos", { ...meta, path });
 }
+export const uploadPhoto = (jobId, userId, file, caption) => uploadFile(jobId, userId, file, { folder: "photos", caption });
 
 const urlCache = new Map();
 export async function photoUrls(paths) {
@@ -209,7 +222,7 @@ export async function enablePush(userId) {
 }
 
 // ================================================================== DEMO
-const DKEY = "age-demo-v2";
+const DKEY = "age-demo-v3";
 function demoDb() { try { return JSON.parse(localStorage.getItem(DKEY)) || {}; } catch (_) { return memoryDb; } }
 let memoryDb = {};
 function demoSave(db) { memoryDb = db; try { localStorage.setItem(DKEY, JSON.stringify(db)); } catch (_) { /* storage full or blocked */ } }
@@ -253,6 +266,7 @@ function demoInsert(table, rows) {
     if (table === "jobs") row.status ??= "planned", row.priority ??= 2, row.work_days ??= [1, 2, 3, 4, 5];
     if (table === "job_members") row.status ??= "approved";
     if (table === "time_logs") row.arrived_at ??= now;
+    if (table === "photos") row.folder ??= "photos", row.mime ??= "image/jpeg";
     if (table === "events") row.urgency ??= "normal", row.color ??= "orange", row.private ??= false, row.assignees ??= [], row.done ??= false;
     const pk = PKS[table];
     if (pk && db[table].some((x) => pk.every((k) => x[k] === row[k]))) throw new Error("Already added");
