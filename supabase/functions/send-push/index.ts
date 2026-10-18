@@ -55,10 +55,11 @@ Deno.serve(async (req) => {
       title, body, job_id: job_id ?? null, kind: "message", recipients, created_by: user.id,
     });
 
-    const sent = await deliver(admin, recipients, {
+    const result = await deliver(admin, recipients, {
       title, body: body ?? "", url: job_id ? `./#/job/${job_id}` : "./#/alerts",
     });
-    return json(200, { recipients: recipients.length, devices: sent });
+    console.log("send-push result", JSON.stringify(result));
+    return json(200, { recipients: recipients.length, devices: result.ok, failed: result.failed });
   } catch (e) {
     return json(500, { error: String(e?.message ?? e) });
   }
@@ -66,23 +67,30 @@ Deno.serve(async (req) => {
 
 // deno-lint-ignore no-explicit-any
 async function deliver(admin: any, userIds: string[], payload: Record<string, string>) {
-  if (!userIds.length) return 0;
+  const failed: Array<Record<string, unknown>> = [];
+  if (!userIds.length) return { ok: 0, failed };
   const { data: subs } = await admin.from("push_subscriptions").select("*").in("user_id", userIds);
+  console.log(`send-push: ${userIds.length} people, ${(subs ?? []).length} devices`);
   let ok = 0;
   await Promise.all((subs ?? []).map(async (s: { id: string; endpoint: string; p256dh: string; auth: string }) => {
+    const host = (() => { try { return new URL(s.endpoint).host; } catch { return "?"; } })();
     try {
-      await webpush.sendNotification(
+      const res = await webpush.sendNotification(
         { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
         JSON.stringify(payload),
-        { TTL: 60 * 60 },
+        { TTL: 60 * 60, urgency: "high" },
       );
+      console.log(`send-push OK ${host} status ${res?.statusCode}`);
       ok++;
     } catch (err) {
+      const info = { host, status: err?.statusCode ?? null, body: String(err?.body ?? err?.message ?? err).slice(0, 300) };
+      console.error("send-push FAILED", JSON.stringify(info));
+      failed.push(info);
       // Phone uninstalled the app or turned notifications off — clean up.
       if (err?.statusCode === 404 || err?.statusCode === 410) {
         await admin.from("push_subscriptions").delete().eq("id", s.id);
       }
     }
   }));
-  return ok;
+  return { ok, failed };
 }

@@ -5,7 +5,7 @@ import {
   html, useState, useEffect, useMemo, useRef,
   S, setS, useStore, loadAll, act, toast, friendlyError, isBoss, person, activePeople, jobById, jobColor, crewOf, assigneesOf,
   onSiteAt, go, today, isoDate, addDays, parseDate, fmtDate, fmtTime, ago, firstName,
-  PRIORITY, I, Avatar, Sheet, Field, PeoplePicker, Empty, Confirm,
+  PRIORITY, I, Avatar, AvatarStack, Sheet, Field, PeoplePicker, Empty, Confirm,
 } from "./lib.js";
 import { TaskSheet } from "./job.js";
 
@@ -185,11 +185,14 @@ export function SchedulePage() {
   const [day, setDay] = useState(today());
   const [scope, setScope] = useState(boss ? "all" : "mine");
   const [shifts, setShifts] = useState([]);
+  const [events, setEvents] = useState([]);
   const [sheet, setSheet] = useState(null);
+  const [evSheet, setEvSheet] = useState(null);
 
   const days = [...Array(7)].map((_, i) => isoDate(addDays(week, i)));
   async function reload() {
     try { setShifts(await api.list("shifts", { gte: { work_date: days[0] }, lte: { work_date: days[6] }, order: ["start_time"] })); } catch (e) { console.error(e); }
+    try { setEvents(await api.list("events", { gte: { event_date: days[0] }, lte: { event_date: days[6] }, order: ["start_time"] })); } catch (e) { console.error(e); setEvents([]); }
   }
   useEffect(() => { reload(); }, [week.getTime(), s.jobs, s.members]);
   useEffect(() => { if (!days.includes(day)) setDay(days[0] <= today() && today() <= days[6] ? today() : days[0]); }, [week.getTime()]);
@@ -217,11 +220,19 @@ export function SchedulePage() {
     return [...byJob.values()].map((g) => ({ ...g, rows: [...g.rows.values()].sort((a, b) => (a.start || "").localeCompare(b.start || "")) }))
       .sort((a, b) => (a.job.start_time || "").localeCompare(b.job.start_time || ""));
   }
+  const eventsOn = (date) => events
+    .filter((e) => e.event_date === date && (scope === "all" || e.created_by === s.me.id || (e.assignees || []).includes(s.me.id)))
+    .sort((a, b) => (a.start_time || "").localeCompare(b.start_time || "") || (URGENCY[b.urgency]?.rank || 0) - (URGENCY[a.urgency]?.rank || 0));
   const list = agenda(day);
+  const dayEvents = eventsOn(day);
   const label = `${fmtDate(days[0])} – ${fmtDate(days[6])}`;
 
   return html`<main class="page">
-    <div class="page-head"><h1>Schedule</h1>${boss && html`<button class="btn sm" onClick=${() => setSheet({ date: day })}>${I.plus} Schedule crew</button>`}</div>
+    <div class="page-head sched-head"><h1>Schedule</h1>
+      <div class="row" style="gap:8px">
+        <button class="btn sm ghost" onClick=${() => setEvSheet({ date: day })}>${I.plus} Event</button>
+        ${boss && html`<button class="btn sm" onClick=${() => setSheet({ date: day })}>${I.plus} Schedule crew</button>`}
+      </div></div>
     <div class="seg" style="margin-bottom:14px">
       <button class=${scope === "mine" ? "on" : ""} onClick=${() => setScope("mine")}>My schedule</button>
       <button class=${scope === "all" ? "on" : ""} onClick=${() => setScope("all")}>Everyone</button>
@@ -233,10 +244,13 @@ export function SchedulePage() {
     </div>
     <div class="days">${days.map((d) => {
       const has = agenda(d).some((g) => g.rows.length || scope === "all");
+      const evs = eventsOn(d);
       return html`<button key=${d} class="daybtn ${d === day ? "on" : ""} ${d === today() ? "today" : ""} ${has ? "has" : ""}" onClick=${() => setDay(d)}>
-        <small>${fmtDate(d, { weekday: "short" }).slice(0, 2)}</small><b>${parseDate(d).getDate()}</b><i></i></button>`;
+        <small>${fmtDate(d, { weekday: "short" }).slice(0, 2)}</small><b>${parseDate(d).getDate()}</b>
+        ${evs.length ? html`<span class="evdots">${evs.slice(0, 3).map((e) => html`<span key=${e.id} style=${`background:${evColor(e)}`}></span>`)}</span>` : html`<i></i>`}</button>`;
     })}</div>
     <h3 style="margin-bottom:12px">${day === today() ? "Today" : fmtDate(day, { weekday: "long", month: "long", day: "numeric" })}</h3>
+    ${dayEvents.length > 0 && html`<div class="events">${dayEvents.map((e) => html`<${EventCard} key=${e.id} ev=${e} onOpen=${() => setEvSheet({ ev: e })} />`)}</div>`}
     ${list.length ? list.map(({ job, rows }) => html`<div class="card shift-group" key=${job.id} style=${`--c:${jobColor(job.id)}`}>
       <div class="row"><span class="jobdot"></span><a class="grow" href=${"#/job/" + job.id} style="color:inherit;text-decoration:none"><strong>${job.title}</strong>
         <div class="small muted">${job.address || "No address"}</div></a>${job.start_time && html`<span class="tag">${fmtTime(job.start_time)}</span>`}</div>
@@ -246,9 +260,103 @@ export function SchedulePage() {
         ${onSiteAt(job.id).includes(r.uid) && day === today() && html`<span class="tag" style="color:var(--done)">On site</span>`}</button>`)}</div>`
         : html`<p class="small muted" style="margin:4px 0 0">Nobody scheduled.</p>`}
     </div>`)
-    : html`<${Empty} icon=${I.calendar} title=${scope === "mine" ? "Nothing scheduled for you" : "Nothing scheduled"} text=${boss ? "Use “Schedule crew” to put people on a job." : "Enjoy the day off — or check Everyone."} />`}
+    : !dayEvents.length && html`<${Empty} icon=${I.calendar} title=${scope === "mine" ? "Nothing scheduled for you" : "Nothing scheduled"} text=${boss ? "Use “Schedule crew” to put people on a job, or “Event” for a reminder like “Call contractor.”" : "Tap “Event” to add a reminder for yourself."} />`}
     ${sheet && html`<${ShiftSheet} ...${sheet} onClose=${() => setSheet(null)} onSaved=${reload} />`}
+    ${evSheet && html`<${EventSheet} ...${evSheet} onClose=${() => setEvSheet(null)} onSaved=${reload} />`}
   </main>`;
+}
+
+// ------------------------------------------------------------- events
+export const EV_COLORS = [
+  ["orange", "#ef4a2b"], ["blue", "#3f6c99"], ["green", "#2f8a4f"], ["purple", "#7b4fc4"], ["yellow", "#c78a00"], ["gray", "#6b7480"],
+];
+export const URGENCY = {
+  low: { label: "Low", rank: 0 },
+  normal: { label: "Normal", rank: 1 },
+  high: { label: "High", rank: 2 },
+  urgent: { label: "Urgent", rank: 3 },
+};
+const evColor = (e) => (EV_COLORS.find(([k]) => k === e.color) || EV_COLORS[0])[1];
+
+function EventCard({ ev, onOpen }) {
+  const job = ev.job_id && jobById(ev.job_id);
+  const done = !!ev.done;
+  return html`<button class="evcard ${done ? "done" : ""} u-${ev.urgency}" style=${`--ec:${evColor(ev)}`} onClick=${onOpen}>
+    <span class="evtime">${ev.start_time ? fmtTime(ev.start_time) : "All day"}${ev.end_time ? html`<small>${fmtTime(ev.end_time)}</small>` : ""}</span>
+    <span class="grow">
+      <strong>${ev.title}</strong>
+      ${ev.notes && html`<span class="evnotes">${ev.notes}</span>`}
+      <span class="evmeta">
+        ${ev.urgency !== "normal" && html`<span class="urg u-${ev.urgency}">${URGENCY[ev.urgency]?.label}</span>`}
+        ${job && html`<span>${job.title}</span>`}
+        ${ev.private ? html`<span>Only me</span>` : html`<span>by ${firstName(person(ev.created_by))}</span>`}
+        ${(ev.assignees || []).length > 0 && html`<${AvatarStack} ids=${ev.assignees} max=${3} size=${20} />`}
+      </span>
+    </span>
+    ${done && html`<span class="tag" style="color:var(--done)">Done</span>`}
+  </button>`;
+}
+
+function EventSheet({ date, ev, onClose, onSaved }) {
+  const s = useStore();
+  const isNew = !ev;
+  const canEdit = isNew || ev.created_by === s.me.id || isBoss();
+  const [f, setF] = useState(() => ({
+    title: ev?.title || "", notes: ev?.notes || "", event_date: ev?.event_date || date || today(),
+    allDay: ev ? !ev.start_time : false, start: (ev?.start_time || "09:00").slice(0, 5), end: (ev?.end_time || "").slice(0, 5),
+    color: ev?.color || "orange", urgency: ev?.urgency || "normal", job_id: ev?.job_id || "", private: ev?.private ?? false,
+    assignees: ev?.assignees || [], done: !!ev?.done,
+  }));
+  const [confirmDel, setConfirmDel] = useState(false);
+  const set = (k, v) => setF({ ...f, [k]: v });
+
+  async function save() {
+    if (!f.title.trim()) return toast("Give the event a name", "error");
+    if (!f.allDay && f.end && f.end <= f.start) return toast("End time must be after the start time", "error");
+    const row = {
+      title: f.title.trim(), notes: f.notes.trim() || null, event_date: f.event_date,
+      start_time: f.allDay ? null : f.start, end_time: f.allDay || !f.end ? null : f.end,
+      color: f.color, urgency: f.urgency, job_id: f.job_id || null, private: f.private,
+      assignees: f.private ? [] : f.assignees, done: f.done,
+    };
+    const ok = await act(() => (isNew ? api.insert("events", { ...row, created_by: s.me.id }) : api.update("events", { id: ev.id }, row)), isNew ? "Event added" : "Saved");
+    if (ok) { onSaved(); onClose(); }
+  }
+
+  if (!canEdit) {
+    return html`<${Sheet} title="Event" onClose=${onClose} footer=${html`<button class="btn ghost" onClick=${onClose}>Close</button>`}>
+      <div class="row" style="margin-bottom:6px"><span class="jobdot" style=${`--c:${evColor(ev)}`}></span><h2>${ev.title}</h2></div>
+      <p class="muted">${fmtDate(ev.event_date, { weekday: "long", month: "long", day: "numeric" })} · ${ev.start_time ? fmtTime(ev.start_time) + (ev.end_time ? " – " + fmtTime(ev.end_time) : "") : "All day"}</p>
+      ${ev.urgency !== "normal" && html`<p><span class="urg u-${ev.urgency}">${URGENCY[ev.urgency]?.label}</span></p>`}
+      ${ev.notes && html`<p style="white-space:pre-wrap">${ev.notes}</p>`}
+      <p class="small muted">Added by ${person(ev.created_by)?.full_name || "someone"}</p>
+    </${Sheet}>`;
+  }
+
+  return html`<${Sheet} title=${isNew ? "New event" : "Edit event"} onClose=${onClose}
+    footer=${html`${!isNew && html`<button class="icon-btn" onClick=${() => setConfirmDel(true)} aria-label="Delete event">${I.trash}</button>`}
+      <button class="btn ghost" onClick=${onClose}>Cancel</button><button class="btn" onClick=${save}>${isNew ? "Add event" : "Save"}</button>`}>
+    <${Field} label="What"><input type="text" value=${f.title} maxlength="80" onInput=${(e) => set("title", e.target.value)} placeholder="e.g. Call contractor" /></${Field}>
+    <${Field} label="Date"><input type="date" value=${f.event_date} onInput=${(e) => set("event_date", e.target.value)} /></${Field}>
+    <label class="switch" style="margin:-4px 0 12px"><input type="checkbox" checked=${f.allDay} onChange=${(e) => set("allDay", e.target.checked)} /> All day</label>
+    ${!f.allDay && html`<div class="two">
+      <${Field} label="Start"><input type="time" value=${f.start} onInput=${(e) => set("start", e.target.value)} /></${Field}>
+      <${Field} label="End (optional)"><input type="time" value=${f.end} onInput=${(e) => set("end", e.target.value)} /></${Field}>
+    </div>`}
+    <${Field} label="Urgency"><div class="seg">${Object.entries(URGENCY).map(([k, v]) => html`<button type="button" key=${k} class="${f.urgency === k ? "on" : ""} useg-${k}" onClick=${() => set("urgency", k)}>${v.label}</button>`)}</div></${Field}>
+    <${Field} label="Color"><div class="swatches">${EV_COLORS.map(([k, c]) => html`<button type="button" key=${k} class="swatch ${f.color === k ? "on" : ""}" style=${`--sw:${c}`} aria-label=${k} onClick=${() => set("color", k)}>${f.color === k ? I.check : ""}</button>`)}</div></${Field}>
+    <${Field} label="Notes (optional)"><textarea rows="3" value=${f.notes} onInput=${(e) => set("notes", e.target.value)} placeholder="Phone number, what to ask, materials…"></textarea></${Field}>
+    <${Field} label="Related job (optional)"><select value=${f.job_id} onChange=${(e) => set("job_id", e.target.value)}>
+      <option value="">None</option>
+      ${s.jobs.filter((j) => j.status !== "done" || j.id === f.job_id).map((j) => html`<option key=${j.id} value=${j.id}>${j.title}</option>`)}</select></${Field}>
+    <${Field} label="Who sees this"><div class="seg">
+      <button type="button" class=${f.private ? "on" : ""} onClick=${() => set("private", true)}>Only me</button>
+      <button type="button" class=${!f.private ? "on" : ""} onClick=${() => set("private", false)}>Everyone</button></div></${Field}>
+    ${!f.private && html`<${Field} label="Assign to (optional)" hint="Assigned people see it under My schedule."><${PeoplePicker} value=${f.assignees} onChange=${(v) => set("assignees", v)} /></${Field}>`}
+    ${!isNew && html`<label class="switch"><input type="checkbox" checked=${f.done} onChange=${(e) => set("done", e.target.checked)} /> Mark as done</label>`}
+    ${confirmDel && html`<${Confirm} title="Delete this event?" text=${`“${ev.title}” will be removed.`} onClose=${() => setConfirmDel(false)}
+      onOk=${async () => { if (await act(() => api.remove("events", { id: ev.id }), "Event deleted")) { onSaved(); onClose(); } }} />`}
+  </${Sheet}>`;
 }
 
 function ShiftSheet({ date, shift, onClose, onSaved }) {

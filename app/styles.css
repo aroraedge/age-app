@@ -374,3 +374,31 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 :root[data-theme="dark"] .only-light { display: none; }
 :root[data-theme="dark"] .only-dark { display: block; }
 .c-active .circle-inner .pct { color: var(--accent); }
+
+/* ---------- events on the schedule ---------- */
+.events { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.evcard { display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line);
+  border-left: 5px solid var(--ec); border-radius: 12px; padding: 11px 12px; box-shadow: var(--shadow); }
+.evcard.done { opacity: .55; }
+.evcard.done strong { text-decoration: line-through; }
+.evcard.u-urgent { box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 45%, transparent), var(--shadow); }
+.evtime { width: 66px; flex: none; font-family: var(--font-head); font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--ec); line-height: 1.2; padding-top: 1px; }
+.evtime small { display: block; font-weight: 600; font-size: 12px; color: var(--muted); }
+.evcard strong { display: block; }
+.evnotes { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; color: var(--ink-2); margin-top: 2px; white-space: pre-wrap; }
+.evmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 5px; font-size: 12.5px; color: var(--muted); }
+.urg { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; padding: 2px 7px; border-radius: 6px; }
+.urg.u-low { background: var(--surface-2); color: var(--muted); }
+.urg.u-high { background: color-mix(in srgb, var(--hold) 18%, transparent); color: var(--hold); }
+.urg.u-urgent { background: var(--danger); color: #fff; }
+.seg button.on.useg-urgent { background: var(--danger); color: #fff; }
+.seg button.on.useg-high { color: var(--hold); }
+.evdots { display: flex; justify-content: center; gap: 3px; margin-top: 3px; height: 6px; }
+.evdots span { width: 6px; height: 6px; border-radius: 50%; }
+.daybtn.on .evdots span { box-shadow: 0 0 0 1.5px var(--ink); }
+.swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+.swatch { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--sw); color: #fff; display: grid; place-items: center; padding: 0; }
+.swatch.on { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--sw); }
+.swatch svg { width: 18px; height: 18px; }
+.sched-head { flex-wrap: wrap; row-gap: 10px; }
+@media (max-width: 440px) { .sched-head h1 { width: 100%; } }

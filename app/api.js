@@ -209,7 +209,7 @@ export async function enablePush(userId) {
 }
 
 // ================================================================== DEMO
-const DKEY = "age-demo-v1";
+const DKEY = "age-demo-v2";
 function demoDb() { try { return JSON.parse(localStorage.getItem(DKEY)) || {}; } catch (_) { return memoryDb; } }
 let memoryDb = {};
 function demoSave(db) { memoryDb = db; try { localStorage.setItem(DKEY, JSON.stringify(db)); } catch (_) { /* storage full or blocked */ } }
@@ -227,6 +227,10 @@ function matches(row, f) {
 function demoList(table, f) {
   const db = demoDb();
   let rows = (db[table] || []).filter((r) => matches(r, f));
+  if (table === "events") {
+    const me = db._session?.user_id;
+    rows = rows.filter((e) => !e.private || e.created_by === me);
+  }
   if (table === "notifications") {
     const me = db._session?.user_id;
     const boss = db.profiles.find((p) => p.id === me)?.role === "boss";
@@ -249,6 +253,7 @@ function demoInsert(table, rows) {
     if (table === "jobs") row.status ??= "planned", row.priority ??= 2, row.work_days ??= [1, 2, 3, 4, 5];
     if (table === "job_members") row.status ??= "approved";
     if (table === "time_logs") row.arrived_at ??= now;
+    if (table === "events") row.urgency ??= "normal", row.color ??= "orange", row.private ??= false, row.assignees ??= [], row.done ??= false;
     const pk = PKS[table];
     if (pk && db[table].some((x) => pk.every((k) => x[k] === row[k]))) throw new Error("Already added");
     db[table].push(row);
@@ -374,6 +379,11 @@ function demoEnsureSeed() {
       { key: "reminder_minutes", value: "30" }, { key: "timezone", value: "America/New_York" }, { key: "join_requires_approval", value: "false" },
     ],
     jobs, job_members, tasks, task_assignments, shifts, time_logs, notes, photos: [], push_subscriptions: [], notifications,
+    events: [
+      { id: uuid(), title: "Call electrical contractor", notes: "Confirm rough-in date for Harbor Dental. Ask about panel upgrade quote.", event_date: d(0), start_time: "10:00", end_time: null, color: "blue", urgency: "high", job_id: J.office, private: false, assignees: [], done: false, created_by: P.boss, created_at: ts(-1, 9) },
+      { id: uuid(), title: "Insurance adjuster on site", notes: "Meet at Oak Hollow. Bring photos of storm damage.", event_date: d(1), start_time: "13:30", end_time: "14:30", color: "orange", urgency: "urgent", job_id: J.roof, private: false, assignees: [P.luis], done: false, created_by: P.boss, created_at: ts(-1, 9) },
+      { id: uuid(), title: "Order quartz samples", notes: "", event_date: d(0), start_time: null, end_time: null, color: "purple", urgency: "normal", job_id: J.kitchen, private: true, assignees: [], done: false, created_by: P.boss, created_at: ts(-1, 9) },
+    ],
     _session: null,
   });
 }
