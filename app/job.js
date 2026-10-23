@@ -47,7 +47,7 @@ export function JobPage({ id, tab }) {
       </div>
       <div class="row wrap" style="margin-top:4px">
         <span class="pill ${STATUS[job.status].cls}">${STATUS[job.status].label}</span>
-        ${job.priority === 1 && html`<span class="pill" style="color:#ffb38a">High priority</span>`}
+        ${job.priority === 1 && html`<span class="pill" style="color:#ff9b93">High priority</span>`}
       </div>
       <h1>${job.title}</h1>
       <div class="meta">

@@ -268,7 +268,7 @@ export function SchedulePage() {
 
 // ------------------------------------------------------------- events
 export const EV_COLORS = [
-  ["orange", "#ef4a2b"], ["blue", "#3f6c99"], ["green", "#2f8a4f"], ["purple", "#7b4fc4"], ["yellow", "#c78a00"], ["gray", "#6b7480"],
+  ["orange", "#f2bd15"], ["blue", "#3f6c99"], ["green", "#2f8a4f"], ["purple", "#7b4fc4"], ["yellow", "#0c8599"], ["gray", "#6b7480"],
 ];
 export const URGENCY = {
   low: { label: "Low", rank: 0 },
@@ -590,7 +590,7 @@ export function PushBanner() {
   if (!st || hide || st.subscribed || (!st.supported && !st.needsInstall) || st.permission === "denied") return null;
   const dismiss = () => { setHide(true); try { localStorage.setItem("hidePushBanner", "1"); } catch (_) { /* ignore */ } };
   return html`<div class="banner">
-    <span style="color:var(--accent)">${I.bell}</span>
+    <span style="color:var(--accent-fg)">${I.bell}</span>
     <div class="grow"><strong>${st.needsInstall ? "Add this app to your Home Screen" : "Turn on job reminders"}</strong>
       <p>${st.needsInstall ? "On iPhone, tap the Share button, then “Add to Home Screen.” Open the app from there to get reminders." : "Get a heads-up before each job starts, with the address."}</p>
       ${!st.needsInstall && html`<button class="btn sm" style="margin-top:8px" onClick=${async () => {

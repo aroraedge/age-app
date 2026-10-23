@@ -1,6 +1,6 @@
 {
-  "name": "AGE",
-  "short_name": "AGE",
+  "name": "ICR",
+  "short_name": "ICR",
   "description": "Jobs, tasks, schedules and crew in one simple app.",
   "start_url": "./",
   "scope": "./",

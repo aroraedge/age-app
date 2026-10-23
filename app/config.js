@@ -4,8 +4,8 @@
 //  (sample data saved only on this device).
 // ============================================================
 export const CONFIG = {
-  COMPANY_NAME: "AGE",
-  APP_NAME: "AGE",
+  COMPANY_NAME: "ICR",
+  APP_NAME: "ICR",
 
   // From Supabase → Project Settings → API (or "Connect")
   SUPABASE_URL: "https://qovctplnmangzdsszgwv.supabase.co",

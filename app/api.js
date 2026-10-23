@@ -222,7 +222,7 @@ export async function enablePush(userId) {
 }
 
 // ================================================================== DEMO
-const DKEY = "age-demo-v3";
+const DKEY = "icr-demo-v1";
 function demoDb() { try { return JSON.parse(localStorage.getItem(DKEY)) || {}; } catch (_) { return memoryDb; } }
 let memoryDb = {};
 function demoSave(db) { memoryDb = db; try { localStorage.setItem(DKEY, JSON.stringify(db)); } catch (_) { /* storage full or blocked */ } }

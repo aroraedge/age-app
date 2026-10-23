@@ -1,5 +1,5 @@
 // Service worker: offline app shell + push notifications.
-const CACHE = "age-v3";
+const CACHE = "icr-v1";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "lib.js", "api.js", "job.js", "screens.js", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/logo-light.png", "icons/logo-dark.png", "vendor/htm-preact.js"];
 
 self.addEventListener("install", (e) => {
@@ -22,8 +22,8 @@ self.addEventListener("fetch", (e) => {
 
 self.addEventListener("push", (e) => {
   let data = {};
-  try { data = e.data ? e.data.json() : {}; } catch (_) { data = { title: "AGE", body: e.data && e.data.text() }; }
-  e.waitUntil(self.registration.showNotification(data.title || "AGE", {
+  try { data = e.data ? e.data.json() : {}; } catch (_) { data = { title: "ICR", body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(data.title || "ICR", {
     body: data.body || "",
     icon: "icons/icon-192.png",
     badge: "icons/badge-96.png",

@@ -1,6 +1,6 @@
-# AGE Crew App
+# ICR Crew App
 
-Jobs, tasks, schedules, time on site, photos and push reminders for AGE crews.
+Jobs, tasks, schedules, time on site, photos and push reminders for ICR crews.
 
 - `app/` — the installable web app (no build step). Netlify publishes this folder.
 - `supabase/schema.sql` — database tables, security rules, photo storage, reminder logic.
