@@ -1,6 +1,6 @@
 // Service worker: offline app shell + push notifications.
-const CACHE = "icr-v1";
-const SHELL = ["./", "index.html", "styles.css", "app.js", "lib.js", "api.js", "job.js", "screens.js", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/logo-light.png", "icons/logo-dark.png", "vendor/htm-preact.js"];
+const CACHE = "icr-v3";
+const SHELL = ["./", "index.html", "styles.css", "app.js", "lib.js", "api.js", "job.js", "screens.js", "estimates.js", "chat.js", "config.js", "manifest.webmanifest", "icons/icon-192.png", "icons/logo-light.png", "icons/logo-dark.png", "vendor/htm-preact.js"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -610,6 +610,8 @@ export function MePage() {
   const [f, setF] = useState({ full_name: s.me.full_name, phone: s.me.phone || "" });
   const [push, setPush] = useState(null);
   const [pw, setPw] = useState("");
+  const avInput = useRef();
+  const [avBusy, setAvBusy] = useState(false);
   useEffect(() => { api.pushStatus().then(setPush).catch(() => setPush({ supported: false })); }, []);
 
   async function enable() {
@@ -625,8 +627,18 @@ export function MePage() {
   return html`<main class="page">
     <div class="page-head"><h1>Me</h1></div>
     <div class="card">
-      <div class="row" style="margin-bottom:14px"><${Avatar} id=${s.me.id} size=${54} />
-        <div class="grow"><strong style="font-size:19px">${s.me.full_name}</strong><div class="small muted">${s.me.email} · ${boss ? "Boss" : "Crew"}</div></div></div>
+      <div class="row" style="margin-bottom:14px">
+        <button class="avatar-edit" onClick=${() => avInput.current.click()} aria-label="Change profile photo" disabled=${avBusy}>
+          <${Avatar} id=${s.me.id} size=${64} /><span class="avatar-edit-ic">${avBusy ? "…" : I.camera}</span></button>
+        <input ref=${avInput} type="file" accept="image/*" class="hidden" onChange=${async (e) => {
+          const file = e.target.files[0]; e.target.value = ""; if (!file) return;
+          setAvBusy(true);
+          await act(() => api.uploadAvatar(s.me.id, file), "Profile photo updated");
+          setAvBusy(false);
+        }} />
+        <div class="grow"><strong style="font-size:19px">${s.me.full_name}</strong><div class="small muted">${s.me.email} · ${boss ? "Boss" : "Crew"}</div>
+          <button class="linkish" onClick=${() => avInput.current.click()}>${s.me.avatar_url ? "Change photo" : "Add a profile photo"}</button>
+          ${s.me.avatar_url && html` · <button class="linkish" onClick=${() => act(() => api.update("profiles", { id: s.me.id }, { avatar_url: null }), "Photo removed")}>Remove</button>`}</div></div>
       <${Field} label="Your name"><input type="text" value=${f.full_name} onInput=${(e) => setF({ ...f, full_name: e.target.value })} /></${Field}>
       <${Field} label="Phone" hint="Lets your crew tap to call you."><input type="tel" value=${f.phone} onInput=${(e) => setF({ ...f, phone: e.target.value })} /></${Field}>
       <button class="btn block" disabled=${f.full_name === s.me.full_name && f.phone === (s.me.phone || "")}

@@ -9,7 +9,7 @@ import * as api from "./api.js";
 export const S = {
   ready: false, session: null, me: null,
   profiles: [], jobs: [], members: [], tasks: [], assignments: [], shifts: [],
-  openLogs: [], notifications: [], settings: {}, toast: null, seenAlertsAt: "",
+  openLogs: [], notifications: [], settings: {}, toast: null, seenAlertsAt: "", messages: [], chatReady: true, seenChatAt: "",
 };
 const listeners = new Set();
 let version = 0;
@@ -48,6 +48,18 @@ export async function loadAll() {
   const settings = Object.fromEntries(settingsRows.map((r) => [r.key, r.value]));
   setS({ me, profiles, jobs, members, tasks, assignments, shifts, openLogs, notifications, settings, ready: true });
 }
+
+// Team chat: latest messages, oldest first. Safe if the chat table isn't set up yet.
+export async function loadMessages() {
+  if (S.me?.status !== "active") return;
+  try {
+    const rows = await api.list("messages", { order: ["created_at", false], limit: 200 });
+    let seen = S.seenChatAt;
+    try { seen = localStorage.getItem("seenChatAt:" + S.me.id) || ""; } catch (_) { /* ignore */ }
+    setS({ messages: rows.reverse(), chatReady: true, seenChatAt: seen });
+  } catch (e) { console.warn("chat unavailable", e?.message); setS({ chatReady: false }); }
+}
+export const chatUnread = () => (S.messages || []).filter((m) => m.user_id !== S.me?.id && m.created_at > (S.seenChatAt || "")).length;
 
 // Run a mutation, show errors nicely, then refresh data.
 export async function act(fn, okMsg) {
@@ -161,6 +173,10 @@ export function Avatar({ id, size = 32, ring }) {
   const p = person(id);
   const name = p?.full_name || "?";
   const ini = name.split(" ").map((x) => x[0]).slice(0, 2).join("").toUpperCase();
+  if (p?.avatar_url) {
+    return html`<img class="avatar photo ${ring ? "ring" : ""}" src=${p.avatar_url} alt=${name} title=${name} loading="lazy"
+      style=${`width:${size}px;height:${size}px`} />`;
+  }
   return html`<span class="avatar ${ring ? "ring" : ""}" title=${name}
     style=${`width:${size}px;height:${size}px;font-size:${size * 0.4}px;background:hsl(${hue(id)} 45% 42%)`}>${ini}</span>`;
 }
@@ -206,9 +222,9 @@ export function Empty({ icon, title, text, children }) {
   return html`<div class="empty">${icon && html`<div class="empty-ic">${icon}</div>`}<strong>${title}</strong>${text && html`<p>${text}</p>`}${children}</div>`;
 }
 
-export function Confirm({ title, text, okLabel = "Delete", onOk, onClose }) {
+export function Confirm({ title, text, okLabel = "Delete", okClass = "danger", onOk, onClose }) {
   return html`<${Sheet} title=${title} onClose=${onClose}
-    footer=${html`<button class="btn ghost" onClick=${onClose}>Cancel</button><button class="btn danger" onClick=${async () => { await onOk(); onClose(); }}>${okLabel}</button>`}>
+    footer=${html`<button class="btn ghost" onClick=${onClose}>Cancel</button><button class=${"btn " + okClass} onClick=${async () => { await onOk(); onClose(); }}>${okLabel}</button>`}>
     <p>${text}</p></${Sheet}>`;
 }
 
@@ -241,6 +257,8 @@ const ICONS = {
   chevR: () => svg(p("M9 6l6 6-6 6")),
   share: () => svg(html`${p("M12 3v12M7 8l5-5 5 5")}${p("M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6")}`),
   copy: () => svg(html`<rect x="8" y="8" width="12" height="12" rx="2"/>${p("M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3")}`),
+  chat: () => svg(p("M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4h0A1.5 1.5 0 0 1 4 14.5z")),
+  estimate: () => svg(html`${p("M6 3h9l4 4v14H6z")}${p("M14 3v5h5")}${p("M12.5 10.5h-2a1.5 1.5 0 0 0 0 3h1a1.5 1.5 0 0 1 0 3h-2.5M11.5 9.5v1M11.5 16.5v1")}`),
   folder: () => svg(p("M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z")),
   dots: () => svg(html`<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>`),
   hard: () => svg(html`${p("M3 18h18M5 18v-3a7 7 0 0 1 14 0v3")}${p("M10 8.5V6h4v2.5")}`),

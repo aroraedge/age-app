@@ -4,10 +4,12 @@ import * as api from "./api.js";
 import {
   html, render, useState, useEffect, useMemo,
   S, setS, useStore, loadAll, act, toast, friendlyError, isBoss, jobById, crewOf, isMember, tasksOf, progressOf,
-  onSiteAt, openLogFor, unreadCount, useRoute, firstName, go, today, fmtDate, fmtTime, fmtRange, STATUS, I, Empty,
+  onSiteAt, openLogFor, unreadCount, useRoute, firstName, loadMessages, chatUnread, Avatar, go, today, fmtDate, fmtTime, fmtRange, STATUS, I, Empty,
 } from "./lib.js";
 import { JobPage, JobForm } from "./job.js";
 import { BoardPage, SchedulePage, TeamPage, AlertsPage, MePage, PushBanner } from "./screens.js";
+import { EstimatesPage } from "./estimates.js";
+import { ChatPage } from "./chat.js";
 
 // ---------------------------------------------------------------- boot
 async function boot() {
@@ -114,10 +116,19 @@ function Shell() {
   const [top] = route;
   const boss = isBoss();
   const unread = unreadCount();
+  const chatNew = chatUnread();
+
+  // Live chat updates (also drives the Chat tab badge)
+  useEffect(() => {
+    loadMessages();
+    return api.subscribeMessages(() => loadMessages());
+  }, [s.me?.id]);
 
   let page;
   if (top === "job" && route[1]) page = html`<${JobPage} id=${route[1]} tab=${route[2] || "timeline"} />`;
   else if (top === "board" && boss) page = html`<${BoardPage} />`;
+  else if (top === "estimates" && boss) page = html`<${EstimatesPage} />`;
+  else if (top === "chat") page = html`<${ChatPage} />`;
   else if (top === "schedule") page = html`<${SchedulePage} />`;
   else if (top === "team") page = html`<${TeamPage} />`;
   else if (top === "alerts") page = html`<${AlertsPage} />`;
@@ -125,11 +136,11 @@ function Shell() {
   else page = html`<${Dashboard} />`;
 
   const tabs = [
-    ["/", "Jobs", I.jobs, !top || top === "job"],
+    ["/", "Jobs", I.jobs, !top || top === "job" || top === "board"],
+    boss && ["/estimates", "Estimates", I.estimate, top === "estimates"],
     ["/schedule", "Schedule", I.calendar, top === "schedule"],
-    boss && ["/board", "Assign", I.board, top === "board"],
+    ["/chat", "Chat", I.chat, top === "chat", chatNew],
     ["/team", "Team", I.team, top === "team"],
-    ["/me", "Me", I.me, top === "me"],
   ].filter(Boolean);
 
   return html`<div class="app">
@@ -139,10 +150,11 @@ function Shell() {
         <img class="brand-logo" src="icons/logo-light.png" alt=${CONFIG.COMPANY_NAME} />
       </a>
       <a class="icon-btn" href="#/alerts" aria-label="Alerts">${I.bell}${unread > 0 && html`<span class="badge">${unread > 9 ? "9+" : unread}</span>`}</a>
+      <a class="me-btn ${top === "me" ? "on" : ""}" href="#/me" aria-label="My profile and settings"><${Avatar} id=${s.me.id} size=${34} /></a>
     </header>`}
     ${page}
     <nav class="bottomnav"><div class="bottomnav-inner">
-      ${tabs.map(([href, label, icon, on]) => html`<a key=${href} href=${"#" + href} class=${on ? "on" : ""}>${icon}<span>${label}</span></a>`)}
+      ${tabs.map(([href, label, icon, on, badge]) => html`<a key=${href} href=${"#" + href} class=${on ? "on" : ""}><span class="nav-ic">${icon}${badge > 0 && html`<span class="badge">${badge > 9 ? "9+" : badge}</span>`}</span><span>${label}</span></a>`)}
     </div></nav>
     ${s.toast && html`<div class="toast ${s.toast.kind}">${s.toast.text}</div>`}
   </div>`;
@@ -179,7 +191,7 @@ function Dashboard() {
       <div class="stat"><b>${new Set(s.openLogs.map((l) => l.user_id)).size}</b><span>On site now</span></div>
       <div class="stat"><b>${s.tasks.filter((t) => t.status !== "done" && jobById(t.job_id)?.status !== "done").length}</b><span>Open tasks</span></div>
     </div>`}
-    <div class="page-head"><h1>Jobs</h1></div>
+    <div class="page-head"><h1>Jobs</h1>${boss && html`<a class="btn sm ghost" href="#/board">${I.board} Assign work</a>`}</div>
     <div class="chips">${chips.map(([k, label]) => html`<button key=${k} class="chip ${filter === k ? "on" : ""}" onClick=${() => setFilter(k)}>${label}<span class="n">${s.jobs.filter(sets[k]).length}</span></button>`)}</div>
     ${jobs.length ? html`<div class="circles">${jobs.map((j) => html`<${JobCircle} key=${j.id} job=${j} />`)}</div>`
       : html`<${Empty} icon=${I.jobs} title="No jobs here" text=${boss ? "Tap “New job” to add your first one." : filter === "mine" ? "You're not on any open jobs yet. Check “All open” to join one." : "Nothing in this list right now."} />`}

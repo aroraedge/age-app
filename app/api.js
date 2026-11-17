@@ -161,6 +161,75 @@ export async function deletePhoto(photo) {
   await remove("photos", { id: photo.id });
 }
 
+// ---------------------------------------------------------- estimates
+export async function uploadEstimateFile(userId, file) {
+  const pdf = isPdf(file);
+  if (!pdf && !isImage(file)) throw new Error(`“${file.name}” isn't a PDF or photo.`);
+  if (file.size > MAX_PDF_MB * 1024 * 1024) throw new Error(`“${file.name}” is over ${MAX_PDF_MB} MB.`);
+  const blob = pdf ? file : await shrinkImage(file, 1600, 0.82);
+  if (DEMO) {
+    if (blob.size > 3 * 1024 * 1024) throw new Error("Demo mode only keeps files under 3 MB.");
+    const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+    return { file_path: dataUrl, file_name: file.name || "Estimate.pdf" };
+  }
+  const path = `${userId}/estimates/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${pdf ? "pdf" : "jpg"}`;
+  const { error } = await sb.storage.from("job-photos").upload(path, blob, { contentType: pdf ? "application/pdf" : "image/jpeg" });
+  if (error) throw error;
+  return { file_path: path, file_name: (file.name || "Estimate.pdf").slice(0, 120) };
+}
+
+export async function approveEstimate(id, me) {
+  if (DEMO) return demoApproveEstimate(id, me);
+  const { data, error } = await sb.rpc("approve_estimate", { estimate_id: id });
+  if (error) throw error;
+  return data;
+}
+
+export async function addEstimateVersion(estimateId, me, { file_path = null, file_name = null, amount = null, note = null }) {
+  if (DEMO) return demoAddEstimateVersion(estimateId, me, { file_path, file_name, amount, note });
+  const { data, error } = await sb.rpc("add_estimate_version", {
+    estimate_id: estimateId, p_file_path: file_path, p_file_name: file_name, p_amount: amount, p_note: note,
+  });
+  if (error) throw error;
+  return data;
+}
+
+// ---------------------------------------------------------- profile photos
+export async function uploadAvatar(userId, file) {
+  if (!isImage(file)) throw new Error("Pick a photo.");
+  // square-crop to 320px
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) throw new Error("Couldn't read that photo.");
+  const side = Math.min(bitmap.width, bitmap.height);
+  const c = document.createElement("canvas"); c.width = c.height = 320;
+  c.getContext("2d").drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 320, 320);
+  const blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.85));
+  let url;
+  if (DEMO) {
+    url = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+  } else {
+    const path = `${userId}/avatar-${Date.now()}.jpg`;
+    const { error } = await sb.storage.from("avatars").upload(path, blob, { contentType: "image/jpeg", upsert: true });
+    if (error) throw error;
+    url = sb.storage.from("avatars").getPublicUrl(path).data.publicUrl;
+  }
+  await update("profiles", { id: userId }, { avatar_url: url });
+  return url;
+}
+
+// ---------------------------------------------------------- chat (live)
+export function subscribeMessages(onChange) {
+  if (DEMO) {
+    const t = setInterval(onChange, 3000);
+    return () => clearInterval(t);
+  }
+  const ch = sb.channel("team-chat")
+    .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => onChange())
+    .subscribe();
+  const t = setInterval(onChange, 20000); // safety net if live updates are off
+  return () => { clearInterval(t); sb.removeChannel(ch); };
+}
+
 // ---------------------------------------------------------- notifications
 export async function sendPush({ title, body, target, job_id, user_ids }, me, everyoneIds) {
   if (DEMO) {
@@ -222,7 +291,7 @@ export async function enablePush(userId) {
 }
 
 // ================================================================== DEMO
-const DKEY = "icr-demo-v1";
+const DKEY = "icr-demo-v3";
 function demoDb() { try { return JSON.parse(localStorage.getItem(DKEY)) || {}; } catch (_) { return memoryDb; } }
 let memoryDb = {};
 function demoSave(db) { memoryDb = db; try { localStorage.setItem(DKEY, JSON.stringify(db)); } catch (_) { /* storage full or blocked */ } }
@@ -240,6 +309,10 @@ function matches(row, f) {
 function demoList(table, f) {
   const db = demoDb();
   let rows = (db[table] || []).filter((r) => matches(r, f));
+  if (table === "estimates" || table === "estimate_versions" || table === "estimate_notes") {
+    const me = db._session?.user_id;
+    if (db.profiles.find((p) => p.id === me)?.role !== "boss") rows = [];
+  }
   if (table === "events") {
     const me = db._session?.user_id;
     rows = rows.filter((e) => !e.private || e.created_by === me);
@@ -267,6 +340,8 @@ function demoInsert(table, rows) {
     if (table === "job_members") row.status ??= "approved";
     if (table === "time_logs") row.arrived_at ??= now;
     if (table === "photos") row.folder ??= "photos", row.mime ??= "image/jpeg";
+    if (table === "estimates") row.status ??= "pending", row.source ??= "manual";
+    if (table === "estimate_notes" || table === "estimate_versions") row.created_at ??= now;
     if (table === "events") row.urgency ??= "normal", row.color ??= "orange", row.private ??= false, row.assignees ??= [], row.done ??= false;
     const pk = PKS[table];
     if (pk && db[table].some((x) => pk.every((k) => x[k] === row[k]))) throw new Error("Already added");
@@ -296,6 +371,41 @@ function demoRemove(table, match) {
   }
   if (table === "tasks") db.task_assignments = db.task_assignments.filter((a) => a.task_id !== match.id);
   demoSave(db);
+}
+
+function demoAddEstimateVersion(id, me, v) {
+  const db = demoDb();
+  const e = db.estimates.find((x) => x.id === id);
+  if (!e) throw new Error("Estimate not found");
+  db.estimate_versions = db.estimate_versions || [];
+  const next = Math.max(0, ...db.estimate_versions.filter((x) => x.estimate_id === id).map((x) => x.version)) + 1;
+  const now = new Date().toISOString();
+  db.estimate_versions.push({ id: uuid(), estimate_id: id, version: next, file_path: v.file_path, file_name: v.file_name, amount: v.amount ?? e.amount, note: v.note || null, created_by: me, created_at: now });
+  if (v.file_path) { e.file_path = v.file_path; e.file_name = v.file_name; }
+  if (v.amount != null) e.amount = v.amount;
+  if (e.job_id && v.file_path && db.jobs.some((j) => j.id === e.job_id)) {
+    db.photos.push({ id: uuid(), job_id: e.job_id, user_id: me, path: v.file_path, folder: "icr", file_name: v.file_name || "Estimate.pdf", mime: (v.file_name || "").toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg", caption: `Estimate V${next}`, created_at: now });
+  }
+  demoSave(db);
+  return next;
+}
+
+function demoApproveEstimate(id, me) {
+  const db = demoDb();
+  const e = db.estimates.find((x) => x.id === id);
+  if (!e) throw new Error("Estimate not found");
+  const curV = Math.max(0, ...(db.estimate_versions || []).filter((x) => x.estimate_id === id).map((x) => x.version)) || null;
+  e.approved_version = curV;
+  if (e.job_id && db.jobs.some((j) => j.id === e.job_id)) { e.status = "approved"; demoSave(db); return e.job_id; }
+  const desc = [e.description, e.number && `Estimate #${e.number}`, e.client_phone && `Client phone: ${e.client_phone}`, e.client_email && `Client email: ${e.client_email}`].filter(Boolean).join("\n");
+  const job = { id: uuid(), title: e.title, client: e.client, address: e.address, description: desc || null, start_date: e.proposed_start || new Date().toLocaleDateString("en-CA"),
+    end_date: e.proposed_end || null, start_time: "08:00", work_days: [1, 2, 3, 4, 5], status: "planned", priority: 2, created_by: me, created_at: new Date().toISOString() };
+  db.jobs.push(job);
+  db.job_members.push({ job_id: job.id, user_id: me, status: "approved", added_by: me, created_at: job.created_at });
+  if (e.file_path) db.photos.push({ id: uuid(), job_id: job.id, user_id: me, path: e.file_path, folder: "icr", file_name: e.file_name || "Estimate.pdf", mime: (e.file_name || "").toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg", caption: `Approved estimate${curV ? ` (V${curV})` : ""}`, created_at: job.created_at });
+  Object.assign(e, { status: "approved", job_id: job.id, decided_by: me, decided_at: job.created_at });
+  demoSave(db);
+  return job.id;
 }
 
 export function demoReset() { localStorage.removeItem(DKEY); memoryDb = {}; demoEnsureSeed(); }
@@ -393,6 +503,19 @@ function demoEnsureSeed() {
       { key: "reminder_minutes", value: "30" }, { key: "timezone", value: "America/New_York" }, { key: "join_requires_approval", value: "false" },
     ],
     jobs, job_members, tasks, task_assignments, shifts, time_logs, notes, photos: [], push_subscriptions: [], notifications,
+    estimates: [
+      { id: uuid(), number: "1051", title: "Patel Kitchen Refresh", client: "A. Patel", client_phone: "352-555-0144", client_email: "", address: "3302 NW 23rd Ave, Gainesville, FL 32605", description: "Paint cabinets, new hardware, LVP flooring in kitchen and dining.", amount: 14800, proposed_start: d(9), proposed_end: d(20), status: "pending", source: "manual", created_by: P.boss, created_at: ts(-1, 15) },
+      { id: uuid(), number: "1049", title: "Greene Bathroom Remodel", client: "L. Greene", client_phone: "", client_email: "", address: "811 SW 8th Ave, Gainesville, FL 32601", description: "Tub-to-shower conversion with tile surround.", amount: 11250, proposed_start: d(14), proposed_end: d(25), status: "on_hold", source: "manual", created_by: P.boss2, created_at: ts(-4, 10) },
+      { id: uuid(), number: "1047", title: "Lakeview Deck Build", client: "R. Patel", address: "6201 SW 35th Way, Gainesville, FL 32608", description: "16x20 composite deck.", amount: 18450, proposed_start: d(-2), proposed_end: d(9), status: "approved", job_id: J.deck, source: "manual", created_by: P.boss, decided_by: P.boss, decided_at: ts(-6, 11), created_at: ts(-9, 10) },
+      { id: uuid(), number: "1044", title: "Fence Replacement", client: "K. Moore", address: "1200 NE 9th St, Gainesville, FL 32601", description: "120 ft privacy fence.", amount: 6900, status: "declined", source: "manual", created_by: P.boss, decided_by: P.boss2, decided_at: ts(-3, 9), created_at: ts(-12, 10) },
+    ],
+    estimate_versions: [],
+    estimate_notes: [],
+    messages: [
+      { id: uuid(), user_id: P.boss, body: "Morning all — inspector at Smith Kitchen around 11. Keep the side door shut, dog's loose.", created_at: ts(0, 6, 52) },
+      { id: uuid(), user_id: P.mike, body: "Copy. Plumbing on the island will be roughed in before he gets there.", created_at: ts(0, 7, 4) },
+      { id: uuid(), user_id: P.tasha, body: "Deck crew is short 4 joists, supplier dropping them at 10.", created_at: ts(0, 7, 31) },
+    ],
     events: [
       { id: uuid(), title: "Call electrical contractor", notes: "Confirm rough-in date for Harbor Dental. Ask about panel upgrade quote.", event_date: d(0), start_time: "10:00", end_time: null, color: "blue", urgency: "high", job_id: J.office, private: false, assignees: [], done: false, created_by: P.boss, created_at: ts(-1, 9) },
       { id: uuid(), title: "Insurance adjuster on site", notes: "Meet at Oak Hollow. Bring photos of storm damage.", event_date: d(1), start_time: "13:30", end_time: "14:30", color: "orange", urgency: "urgent", job_id: J.roof, private: false, assignees: [P.luis], done: false, created_by: P.boss, created_at: ts(-1, 9) },
@@ -400,4 +523,20 @@ function demoEnsureSeed() {
     ],
     _session: null,
   });
+  // Demo version history + notes for the sample estimates
+  const db = demoDb();
+  const [patel, greene, lake] = db.estimates;
+  db.estimate_versions = [
+    { id: uuid(), estimate_id: patel.id, version: 1, file_path: null, file_name: null, amount: 13200, note: "Original", created_by: P.boss, created_at: ts(-6, 10) },
+    { id: uuid(), estimate_id: patel.id, version: 2, file_path: null, file_name: null, amount: 14800, note: "Added dining room flooring", created_by: P.boss2, created_at: ts(-1, 15) },
+    { id: uuid(), estimate_id: greene.id, version: 1, file_path: null, file_name: null, amount: 11250, note: "Original", created_by: P.boss2, created_at: ts(-4, 10) },
+    { id: uuid(), estimate_id: lake.id, version: 1, file_path: null, file_name: null, amount: 18450, note: "Original", created_by: P.boss, created_at: ts(-9, 10) },
+  ];
+  lake.approved_version = 1;
+  db.estimate_notes = [
+    { id: uuid(), estimate_id: patel.id, user_id: P.boss2, body: "Client asked to price LVP in the dining room too — updated in V2.", created_at: ts(-1, 15, 5) },
+    { id: uuid(), estimate_id: patel.id, user_id: P.boss, body: "Follow up Thursday if no answer.", created_at: ts(-1, 16, 40) },
+    { id: uuid(), estimate_id: greene.id, user_id: P.boss2, body: "On hold until client's insurance check clears.", created_at: ts(-3, 9) },
+  ];
+  demoSave(db);
 }
