@@ -209,8 +209,11 @@ export async function uploadAvatar(userId, file) {
     url = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
   } else {
     const path = `${userId}/avatar-${Date.now()}.jpg`;
-    const { error } = await sb.storage.from("avatars").upload(path, blob, { contentType: "image/jpeg", upsert: true });
-    if (error) throw error;
+    // Each photo gets a new file name, so no "replace" permission is needed.
+    const { error } = await sb.storage.from("avatars").upload(path, blob, { contentType: "image/jpeg", upsert: false });
+    if (error) throw new Error(/row-level security|permission|unauthorized|not allowed/i.test(error.message || "")
+      ? "Profile photos aren't enabled yet. A boss needs to run the profile-photo database update."
+      : error.message || "Upload failed");
     url = sb.storage.from("avatars").getPublicUrl(path).data.publicUrl;
   }
   await update("profiles", { id: userId }, { avatar_url: url });

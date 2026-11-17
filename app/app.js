@@ -7,7 +7,8 @@ import {
   onSiteAt, openLogFor, unreadCount, useRoute, firstName, loadMessages, chatUnread, Avatar, go, today, fmtDate, fmtTime, fmtRange, STATUS, I, Empty,
 } from "./lib.js";
 import { JobPage, JobForm } from "./job.js";
-import { BoardPage, SchedulePage, TeamPage, AlertsPage, MePage, PushBanner } from "./screens.js";
+import { BoardPage, TeamPage, AlertsPage, MePage, PushBanner } from "./screens.js";
+import { SchedulePage } from "./calendar.js";
 import { EstimatesPage } from "./estimates.js";
 import { ChatPage } from "./chat.js";
 

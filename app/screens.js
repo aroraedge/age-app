@@ -176,95 +176,7 @@ function useDragDrop(scrollRef, onDrop) {
 }
 
 // ================================================================ SCHEDULE
-const startOfWeek = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; };
-
-export function SchedulePage() {
-  const s = useStore();
-  const boss = isBoss();
-  const [week, setWeek] = useState(() => startOfWeek(new Date()));
-  const [day, setDay] = useState(today());
-  const [scope, setScope] = useState(boss ? "all" : "mine");
-  const [shifts, setShifts] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [sheet, setSheet] = useState(null);
-  const [evSheet, setEvSheet] = useState(null);
-
-  const days = [...Array(7)].map((_, i) => isoDate(addDays(week, i)));
-  async function reload() {
-    try { setShifts(await api.list("shifts", { gte: { work_date: days[0] }, lte: { work_date: days[6] }, order: ["start_time"] })); } catch (e) { console.error(e); }
-    try { setEvents(await api.list("events", { gte: { event_date: days[0] }, lte: { event_date: days[6] }, order: ["start_time"] })); } catch (e) { console.error(e); setEvents([]); }
-  }
-  useEffect(() => { reload(); }, [week.getTime(), s.jobs, s.members]);
-  useEffect(() => { if (!days.includes(day)) setDay(days[0] <= today() && today() <= days[6] ? today() : days[0]); }, [week.getTime()]);
-
-  // Everything happening on a date: jobs that run that day + explicit shifts
-  function agenda(date) {
-    const dow = ((parseDate(date).getDay() + 6) % 7) + 1;
-    const byJob = new Map();
-    const add = (job, uid, start, end, shift) => {
-      if (scope === "mine" && uid !== s.me.id) return;
-      if (!byJob.has(job.id)) byJob.set(job.id, { job, rows: new Map() });
-      const rows = byJob.get(job.id).rows;
-      if (!rows.has(uid) || shift) rows.set(uid, { uid, start, end, shift });
-    };
-    for (const job of s.jobs) {
-      if (!["active", "planned"].includes(job.status) || !job.start_date) continue;
-      if (date < job.start_date || date > (job.end_date || job.start_date) || !(job.work_days || []).includes(dow)) continue;
-      for (const uid of crewOf(job.id)) add(job, uid, job.start_time, null, null);
-      if (scope === "all" && !byJob.has(job.id)) byJob.set(job.id, { job, rows: new Map() });
-    }
-    for (const sh of shifts.filter((x) => x.work_date === date)) {
-      const job = jobById(sh.job_id);
-      if (job) add(job, sh.user_id, sh.start_time || job.start_time, sh.end_time, sh);
-    }
-    return [...byJob.values()].map((g) => ({ ...g, rows: [...g.rows.values()].sort((a, b) => (a.start || "").localeCompare(b.start || "")) }))
-      .sort((a, b) => (a.job.start_time || "").localeCompare(b.job.start_time || ""));
-  }
-  const eventsOn = (date) => events
-    .filter((e) => e.event_date === date && (scope === "all" || e.created_by === s.me.id || (e.assignees || []).includes(s.me.id)))
-    .sort((a, b) => (a.start_time || "").localeCompare(b.start_time || "") || (URGENCY[b.urgency]?.rank || 0) - (URGENCY[a.urgency]?.rank || 0));
-  const list = agenda(day);
-  const dayEvents = eventsOn(day);
-  const label = `${fmtDate(days[0])} – ${fmtDate(days[6])}`;
-
-  return html`<main class="page">
-    <div class="page-head sched-head"><h1>Schedule</h1>
-      <div class="row" style="gap:8px">
-        <button class="btn sm ghost" onClick=${() => setEvSheet({ date: day })}>${I.plus} Event</button>
-        ${boss && html`<button class="btn sm" onClick=${() => setSheet({ date: day })}>${I.plus} Schedule crew</button>`}
-      </div></div>
-    <div class="seg" style="margin-bottom:14px">
-      <button class=${scope === "mine" ? "on" : ""} onClick=${() => setScope("mine")}>My schedule</button>
-      <button class=${scope === "all" ? "on" : ""} onClick=${() => setScope("all")}>Everyone</button>
-    </div>
-    <div class="weekbar">
-      <button class="icon-btn" onClick=${() => setWeek(addDays(week, -7))} aria-label="Previous week">${I.chevL}</button>
-      <strong>${label}</strong>
-      <button class="icon-btn" onClick=${() => setWeek(addDays(week, 7))} aria-label="Next week">${I.chevR}</button>
-    </div>
-    <div class="days">${days.map((d) => {
-      const has = agenda(d).some((g) => g.rows.length || scope === "all");
-      const evs = eventsOn(d);
-      return html`<button key=${d} class="daybtn ${d === day ? "on" : ""} ${d === today() ? "today" : ""} ${has ? "has" : ""}" onClick=${() => setDay(d)}>
-        <small>${fmtDate(d, { weekday: "short" }).slice(0, 2)}</small><b>${parseDate(d).getDate()}</b>
-        ${evs.length ? html`<span class="evdots">${evs.slice(0, 3).map((e) => html`<span key=${e.id} style=${`background:${evColor(e)}`}></span>`)}</span>` : html`<i></i>`}</button>`;
-    })}</div>
-    <h3 style="margin-bottom:12px">${day === today() ? "Today" : fmtDate(day, { weekday: "long", month: "long", day: "numeric" })}</h3>
-    ${dayEvents.length > 0 && html`<div class="events">${dayEvents.map((e) => html`<${EventCard} key=${e.id} ev=${e} onOpen=${() => setEvSheet({ ev: e })} />`)}</div>`}
-    ${list.length ? list.map(({ job, rows }) => html`<div class="card shift-group" key=${job.id} style=${`--c:${jobColor(job.id)}`}>
-      <div class="row"><span class="jobdot"></span><a class="grow" href=${"#/job/" + job.id} style="color:inherit;text-decoration:none"><strong>${job.title}</strong>
-        <div class="small muted">${job.address || "No address"}</div></a>${job.start_time && html`<span class="tag">${fmtTime(job.start_time)}</span>`}</div>
-      ${rows.length ? html`<div class="list" style="box-shadow:none">${rows.map((r) => html`<button class="li" key=${r.uid} onClick=${() => boss && r.shift && setSheet({ shift: r.shift })}>
-        <${Avatar} id=${r.uid} size=${32} /><span class="grow"><strong>${person(r.uid)?.full_name || "—"}</strong>
-        <span class="small">${r.start ? fmtTime(r.start) : "Time TBD"}${r.end ? " – " + fmtTime(r.end) : ""}${!r.shift ? " · on crew" : ""}</span></span>
-        ${onSiteAt(job.id).includes(r.uid) && day === today() && html`<span class="tag" style="color:var(--done)">On site</span>`}</button>`)}</div>`
-        : html`<p class="small muted" style="margin:4px 0 0">Nobody scheduled.</p>`}
-    </div>`)
-    : !dayEvents.length && html`<${Empty} icon=${I.calendar} title=${scope === "mine" ? "Nothing scheduled for you" : "Nothing scheduled"} text=${boss ? "Use “Schedule crew” to put people on a job, or “Event” for a reminder like “Call contractor.”" : "Tap “Event” to add a reminder for yourself."} />`}
-    ${sheet && html`<${ShiftSheet} ...${sheet} onClose=${() => setSheet(null)} onSaved=${reload} />`}
-    ${evSheet && html`<${EventSheet} ...${evSheet} onClose=${() => setEvSheet(null)} onSaved=${reload} />`}
-  </main>`;
-}
+// The calendar screen lives in calendar.js; the event and shift forms below are shared with it.
 
 // ------------------------------------------------------------- events
 export const EV_COLORS = [
@@ -276,9 +188,9 @@ export const URGENCY = {
   high: { label: "High", rank: 2 },
   urgent: { label: "Urgent", rank: 3 },
 };
-const evColor = (e) => (EV_COLORS.find(([k]) => k === e.color) || EV_COLORS[0])[1];
+export const evColor = (e) => (EV_COLORS.find(([k]) => k === e.color) || EV_COLORS[0])[1];
 
-function EventCard({ ev, onOpen }) {
+export function EventCard({ ev, onOpen }) {
   const job = ev.job_id && jobById(ev.job_id);
   const done = !!ev.done;
   return html`<button class="evcard ${done ? "done" : ""} u-${ev.urgency}" style=${`--ec:${evColor(ev)}`} onClick=${onOpen}>
@@ -297,13 +209,13 @@ function EventCard({ ev, onOpen }) {
   </button>`;
 }
 
-function EventSheet({ date, ev, onClose, onSaved }) {
+export function EventSheet({ date, start, ev, onClose, onSaved }) {
   const s = useStore();
   const isNew = !ev;
   const canEdit = isNew || ev.created_by === s.me.id || isBoss();
   const [f, setF] = useState(() => ({
     title: ev?.title || "", notes: ev?.notes || "", event_date: ev?.event_date || date || today(),
-    allDay: ev ? !ev.start_time : false, start: (ev?.start_time || "09:00").slice(0, 5), end: (ev?.end_time || "").slice(0, 5),
+    allDay: ev ? !ev.start_time : false, start: (ev?.start_time || start || "09:00").slice(0, 5), end: (ev?.end_time || "").slice(0, 5),
     color: ev?.color || "orange", urgency: ev?.urgency || "normal", job_id: ev?.job_id || "", private: ev?.private ?? false,
     assignees: ev?.assignees || [], done: !!ev?.done,
   }));
@@ -359,7 +271,7 @@ function EventSheet({ date, ev, onClose, onSaved }) {
   </${Sheet}>`;
 }
 
-function ShiftSheet({ date, shift, onClose, onSaved }) {
+export function ShiftSheet({ date, shift, onClose, onSaved }) {
   const s = useStore();
   const isNew = !shift;
   const firstJob = s.jobs.find((j) => j.status !== "done");
